@@ -1,25 +1,154 @@
-name: CI
+name: RDP (Windows)
 
-on: [push, workflow_dispatch]
+# ---------------------------------------------------------------------------
+# Gives you a real Windows desktop over Remote Desktop (RDP).
+#
+#   * push a commit, or start the workflow by hand (Actions -> RDP -> Run)
+#   * open the run, read the "YOUR RDP SESSION IS READY" block in the log
+#     (it is also in the run summary and in the annotations at the top)
+#   * connect with mstsc / Microsoft Remote Desktop / xfreerdp
+#
+# No secrets are required. If no ngrok token is configured, the workflow falls
+# back to account-less tunnels (pinggy, bore, serveo) automatically.
+#
+# Optional secrets (Settings -> Secrets and variables -> Actions):
+#   NGROK_AUTH_TOKEN  preferred provider, needs a payment method on file with
+#                     ngrok even on the free plan, otherwise it will fail and
+#                     the account-less providers are used instead
+#   TS_AUTHKEY        tailscale auth key, gives you a stable private IP
+#   RDP_PASSWORD      fixed password instead of a random one per run
+#   RDP_USERNAME      account to enable (defaults to the runner account)
+#   ALLOWED_CIDRS     ngrok only: only allow these source addresses,
+#                     for example "203.0.113.7/32"
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      tunnel:
+        description: 'Tunnel provider (auto = ngrok if a token exists, otherwise pinggy/bore/serveo)'
+        type: choice
+        default: auto
+        options: [auto, pinggy, bore, serveo, ngrok, tailscale]
+      duration_minutes:
+        description: 'Keep the session alive for this many minutes (GitHub allows about 350)'
+        default: '330'
+      runner_image:
+        description: 'Runner image'
+        type: choice
+        default: windows-latest
+        options: [windows-latest, windows-2025, windows-2022]
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+# A new run on the same branch kills the previous one so you never end up with
+# a pile of six hour RDP machines.
+concurrency:
+  group: rdp-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  rdp:
+    name: Windows RDP session
+    runs-on: ${{ inputs.runner_image || 'windows-latest' }}
+    timeout-minutes: 355
 
-    runs-on: windows-latest
+    env:
+      # Optional secrets. Empty values simply mean "not configured".
+      NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+      NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
+      TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+      ALLOWED_CIDRS: ${{ secrets.ALLOWED_CIDRS }}
+      RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+      RDP_USERNAME: ${{ secrets.RDP_USERNAME }}
+      # Workflow inputs (empty on a push).
+      IN_TUNNEL: ${{ inputs.tunnel }}
+      IN_DURATION: ${{ inputs.duration_minutes }}
 
     steps:
-    - name: Download
-      run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
-    - name: Extract
-      run: Expand-Archive ngrok.zip
-    - name: Auth
-      run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
-      env:
-        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-    - name: Enable TS
-      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-    - name: Create Tunnel
-      run: .\ngrok\ngrok.exe tcp 3389
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Validate the PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Path ./scripts, ./client -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "::error file=$($_.Name)::$($errors[0].Message)"
+              $errors | ForEach-Object { Write-Host "  line $($_.Extent.StartLineNumber): $($_.Message)" }
+            }
+            else { Write-Host "syntax OK: $($_.Name)" }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Runner information
+        shell: pwsh
+        run: |
+          Write-Host "Runner image   : $env:ImageOS $env:ImageVersion"
+          Write-Host "Computer name  : $env:COMPUTERNAME"
+          Write-Host "Runner account : $env:USERNAME"
+          Write-Host "Free disk (GB) : $([math]::Round((Get-PSDrive C).Free / 1GB, 1))"
+          Write-Host "CPU cores      : $env:NUMBER_OF_PROCESSORS"
+
+      - name: Enable Remote Desktop
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Enable-RdpServer.ps1 `
+            -Username $env:RDP_USERNAME `
+            -Password $env:RDP_PASSWORD `
+            -Port 3389
+
+      - name: Open a public tunnel to port 3389
+        shell: pwsh
+        run: |
+          $provider = if ($env:IN_TUNNEL) { $env:IN_TUNNEL } else { 'auto' }
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Start-RdpTunnel.ps1 `
+            -Provider $provider `
+            -LocalPort 3389
+
+      - name: Publish the connection details
+        if: always()
+        shell: pwsh
+        run: |
+          $infoFile = if ($env:RDP_INFO_FILE) { $env:RDP_INFO_FILE } else { Join-Path $env:RUNNER_TEMP 'tunnel\rdp-info.txt' }
+          if (Test-Path $infoFile) {
+            Write-Host '--- rdp-info.txt ---'
+            Get-Content $infoFile | ForEach-Object { Write-Host $_ }
+          }
+          else {
+            Write-Host 'No connection details were produced (the tunnel step failed).'
+          }
+          # Make the endpoint visible without digging through the log.
+          if ($env:RDP_HOST) {
+            $port = if ($env:RDP_TUNNEL_PORT) { $env:RDP_TUNNEL_PORT } else { '?' }
+            Write-Host "::notice title=RDP session ($($env:RDP_PROVIDER))::Connect to $($env:RDP_HOST):$port as $($env:RDP_USER) - password is in the run summary"
+          }
+          else {
+            Write-Host '::warning title=No tunnel::The workflow could not open any tunnel. Check the log of the "Open a public tunnel" step.'
+          }
+
+      - name: Upload the connection details as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: rdp-connection-info
+          path: |
+            ${{ runner.temp }}/tunnel/rdp-info.txt
+            ${{ runner.temp }}/tunnel/rdp-info.json
+          if-no-files-found: warn
+
+      - name: Keep the session alive for the requested time
+        shell: pwsh
+        run: |
+          $minutes = 330
+          if ($env:IN_DURATION -and $env:IN_DURATION -match '^\d+$') { $minutes = [int]$env:IN_DURATION }
+          if ($minutes -gt 340) { $minutes = 340 }
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Watch-RdpSession.ps1 -Minutes $minutes

@@ -21,6 +21,8 @@ Start a run, and about two minutes later you have an address, a username and a p
 
 **In a hurry? [RUN.md](RUN.md) has the exact commands for both ways to run this.**
 
+**Want no typing at all?** Once Actions is enabled, double click `client\connect-rdp.cmd`: it starts the workflow if nothing is running, waits for the desktop, saves the credentials so Remote Desktop does not prompt, opens it on the right address, and reconnects by itself when a free tunnel rotates its address. Linux/macOS: `./client/rdp-auto.sh --watch`.
+
 ---
 
 ## Your work is saved between sessions
@@ -167,7 +169,11 @@ scripts/Enable-RdpServer.ps1   turns any Windows machine into an RDP server
 scripts/Start-RdpTunnel.ps1    tunnel engine (ngrok/pinggy/bore/serveo/tailscale) + RDP self test
 scripts/Watch-RdpSession.ps1   keep-alive, health checks, automatic tunnel + autosave restarts
 scripts/Sync-RdpData.ps1        saves your profile to the rdp-data branch and restores it next session
-client/get-rdp-info.ps1        local helper: read host/user/password from the run log, launch mstsc
+client/Connect-Rdp.ps1         auto connector: starts a run if needed, waits, stores credentials, launches
+client/connect-rdp.cmd         double click wrapper for Connect-Rdp.ps1
+client/rdp-auto.sh             the same auto connector for Linux/macOS
+scripts/Start-Rdp.ps1          one command for your own Windows PC (enable + tunnel + keep alive)
+client/get-rdp-info.ps1        lighter helper: just print the host/user/password, or launch mstsc
 client/get-rdp-info.sh         same for Linux/macOS, can launch xfreerdp
 client/connect-rdp.cmd         double click wrapper for Windows
 docs/TROUBLESHOOTING.md        what to do when something does not work

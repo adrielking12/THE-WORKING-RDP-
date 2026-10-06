@@ -4,9 +4,65 @@ There are two ways. **B** works right now. **A** is the GitHub Actions way and i
 
 ---
 
+## C. Fully automated: double click and you are in
+
+Once Actions is enabled (section A, step 0) there is exactly one thing to do: **double click `client\connect-rdp.cmd`**.
+
+That single click:
+
+1. checks whether you already have a live session (a second click connects in a second)
+2. starts the workflow for you if you do not
+3. waits for the Windows desktop to come up, about two minutes
+4. stores the credentials, so Remote Desktop logs in without asking
+5. opens the desktop on the right address
+6. keeps watching, and reconnects by itself when a free tunnel rotates its address
+
+Prerequisites, both one time only:
+
+```powershell
+winget install --id GitHub.cli     # the GitHub CLI
+gh auth login                      # log in through the browser
+```
+
+Then just double click. If you prefer the terminal:
+
+```powershell
+pwsh -File .\client\Connect-Rdp.ps1 -AutoReconnect
+```
+
+```bash
+# Linux / macOS equivalent
+./client/rdp-auto.sh --watch
+```
+
+Useful switches:
+
+| switch | what it does |
+| --- | --- |
+| `-NewSession` | throw away the live machine and start a fresh one |
+| `-NoLaunch` | find the session and print the details, open nothing |
+| `-AutoReconnect` | (on by default in `connect-rdp.cmd`) follow tunnel address changes |
+| `-AutoRestart` | also start a brand new machine when the run hits the six hour limit |
+| `-Tunnel tailscale` | pick the tunnel provider |
+| `-DurationMinutes 330` | session length |
+
+**Auto restart is off by default on purpose.** A machine that silently re-creates itself every six hours, forever, is exactly the pattern that gets accounts flagged. Turn it on with `-AutoRestart` if you accept that, and stop it by closing the window.
+
+---
+
 ## B. On a Windows PC you own (works today)
 
 Needs Windows **Pro, Enterprise or Education** - Home cannot be an RDP server at all.
+
+**0. The one command version.** Open PowerShell (normal, not admin - it elevates itself), then:
+
+```powershell
+git clone https://github.com/adrielking12/THE-WORKING-RDP-.git
+cd THE-WORKING-RDP-
+pwsh -File .\scripts\Start-Rdp.ps1
+```
+
+That enables RDP (one UAC prompt), opens the tunnel, copies the address, username and password to your clipboard, and starts the keep-alive watcher. Everything below is the same thing done step by step.
 
 **1. Get the files**
 
@@ -126,6 +182,7 @@ pwsh -File .\client\get-rdp-info.ps1 -Wait -Launch     # -Launch starts mstsc
 | | own PC / VM | GitHub Actions |
 | --- | --- | --- |
 | works today | **yes** | no, Actions is disabled |
+| how you start it | `scripts\Start-Rdp.ps1` (one command) | `client\Connect-Rdp.ps1` (one click) |
 | needs | Windows Pro+ | the repo, Actions enabled |
 | hardware | your own | free GitHub runner |
 | session length | as long as you keep the tunnel process running | max ~5.5 hours per run |
@@ -143,5 +200,13 @@ pwsh -File .\client\get-rdp-info.ps1 -Wait -Launch     # -Launch starts mstsc
 **"Credentials did not work."** Username and password are printed in the banner; the password is regenerated each session unless you pass `-Password` or set the `RDP_PASSWORD` secret.
 
 **"It disconnected after about an hour."** That is pinggy's free session limit. Use `Watch-RdpSession.ps1 -Minutes 480`, or switch to Tailscale.
+
+**"connect-rdp.cmd just flashes and closes."** Run it from a terminal (`pwsh -File .\client\Connect-Rdp.ps1`) to read the message - it is almost always `gh` missing or not logged in.
+
+**"It says the workflow could not be started."** Actions is disabled for the account, or the token has no access. Open `https://github.com/adrielking12/THE-WORKING-RDP-/settings/actions`.
+
+**"Connect-Rdp.ps1 says the ref has an older workflow."** The branch you are dispatching (`Ref`) does not have the workflow inputs yet. Merge the pull request into `main`, or pass `-Ref` with the branch that does.
+
+**"It connects but the desktop is the old one / my files are missing."** You got a different machine. Files live in the `rdp-data` branch, and `-AutoRestart` machines start from that snapshot, so anything done after the last 10 minute snapshot can be missing.
 
 **"Is this safe?"** You are exposing a desktop. Use a strong password, prefer Tailscale (private) or `ALLOWED_CIDRS` (ngrok, restrict to your IP), and remember a public repo's logs are public.

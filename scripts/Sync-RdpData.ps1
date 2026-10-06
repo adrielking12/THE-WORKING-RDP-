@@ -496,6 +496,16 @@ function Join-Files {
     finally { $out.Dispose() }
 }
 
+<#
+    The token is embedded in the git remote URL, and git likes to print URLs in
+    its error messages. Registering it as a masked value makes Actions redact it
+    from every later log line.
+#>
+function Hide-Token {
+    if ($env:GH_PUSH_TOKEN) { Write-Host "::add-mask::$($env:GH_PUSH_TOKEN)"; return }
+    if ($env:GITHUB_TOKEN) { Write-Host "::add-mask::$($env:GITHUB_TOKEN)" }
+}
+
 function Get-RepositoryUrl {
     param([switch]$WithToken)
     if (-not $repository) { return '' }
@@ -530,6 +540,8 @@ function Write-SyncState {
 # ------------------------------------------------------------------ save -----
 function Invoke-Save {
     param([switch]$ForceSave)
+
+    Hide-Token
 
     $items = Get-SaveSet -ProfileRoot $profileRoot -Extras $ExtraPaths
     if (-not $items -or $items.Count -eq 0) {
@@ -655,6 +667,8 @@ function Invoke-Save {
             Copy-Item -Path (Join-Path $WorkDir $part) -Destination (Join-Path $repoDir $part) -Force
         }
         Copy-Item -Path (Join-Path $stage '_layout.json') -Destination (Join-Path $repoDir '_layout.json') -Force
+        # Belt and braces: never let line ending conversion touch the payload.
+        @('* -text -crlf', '*.zip binary', '*.enc binary') | Set-Content -Path (Join-Path $repoDir '.gitattributes') -Encoding ASCII
 
         $info = [ordered]@{
             saved_at      = (Get-Date).ToUniversalTime().ToString('u')
@@ -697,6 +711,7 @@ function Invoke-Save {
             parts            = $partFiles.Count
             payloadMB        = $payloadMB
             encrypted        = $useEncryption
+            branch           = $Branch
             fileCount        = $signature.Count
             generatedPassword = $generatedPassword
             password         = if ($generatedPassword) { $Password } else { '' }
@@ -713,6 +728,8 @@ function Invoke-Save {
 
 # --------------------------------------------------------------- restore -----
 function Invoke-Restore {
+    Hide-Token
+
     if (-not $repository) {
         Write-Step 'Not running inside GitHub Actions, nothing to restore from.' 'WARN'
         return $false

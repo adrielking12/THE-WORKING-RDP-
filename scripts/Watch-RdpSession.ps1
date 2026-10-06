@@ -157,7 +157,8 @@ while ((Get-Date) -lt $deadline) {
     if ($ok) { $failures = 0 } else { $failures++ }
 
     $status = if ($ok) { 'OK' } else { "unreachable (attempt $failures)" }
-    Write-Step "status: $status | endpoint $host_:$port | provider $provider | remaining ~$remaining min | session in use: $busy" $(if ($ok) { 'OK' } else { 'WARN' })
+    $level = if ($ok) { 'OK' } else { 'WARN' }
+    Write-Step "status: $status | endpoint $host_:$port | provider $provider | remaining ~$remaining min | session in use: $busy" $level
 
     # 3. restart the tunnel when it is broken, or proactively before a relay
     #    drops us (only while nobody is connected).

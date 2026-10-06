@@ -42,6 +42,7 @@ That is pinggy's free session limit. The workflow reopens the tunnel automatical
 
 ## 3. The workflow does not even start
 
+* **"GitHub Actions is currently disabled for this repository. Please reach out to GitHub Support for assistance."** - GitHub turned Actions off for the repository (this is an account level enforcement, not a setting in the workflow file). Check <https://github.com/adrielking12/THE-WORKING-RDP-/settings/actions> for an enable option, and otherwise open a ticket at <https://support.github.com/contact?tags=dotcom-actions>. None of the files in this repository can work around it. The scripts still run fine on your own Windows machine, see "Run it without GitHub Actions" in the README.
 * **"The job was not started because recent account payments have failed" / no runner available** - Windows runners are only available for public repositories with standard runners, or on paid plans. Make the repository public or use a paid plan.
 * **"Workflows aren't being run on this forked repository"** - in a *fork*, Actions are disabled by default. Open the fork's **Actions** tab and press the green **I understand my workflows, go ahead and enable them** button.
 * **The run is cancelled immediately** - a newer run on the same branch cancels the older one (`concurrency`). That is intended, one RDP machine per branch is enough.

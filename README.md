@@ -1,44 +1,61 @@
 # THE WORKING RDP
 
-A GitHub Actions workflow that gives you a **real Windows desktop over Remote Desktop (RDP)**, for free, for up to about six hours per run.
+A GitHub Actions workflow that gives you a **real Windows desktop over Remote Desktop (RDP)**, free, for up to about six hours per run. Plus the same thing as standalone scripts you can run on any Windows machine you own.
 
-Push a commit (or press **Run workflow**) and about two minutes later you have an address, a username and a password. Connect with `mstsc` on Windows, Microsoft Remote Desktop on macOS, `xfreerdp` on Linux, or any RDP app on a phone or tablet.
+Start a run, and about two minutes later you have an address, a username and a password:
 
 ```text
 ==============================================================
   YOUR RDP SESSION IS READY
 ==============================================================
-  Address  : 4.tcp.ngrok.io:19342
+  Address  : free.pinggy.io:48720
   Username : runneradmin
   Password : k7Qm2Xr9Tp-Vn4Hs
   Provider : pinggy
 ==============================================================
-  Windows : mstsc /v:4.tcp.ngrok.io:19342
+  Windows : mstsc /v:free.pinggy.io:48720
+  Linux   : xfreerdp /v:free.pinggy.io:48720 /u:runneradmin
+  macOS   : Microsoft Remote Desktop, PC name free.pinggy.io:48720
 ==============================================================
 ```
 
 ---
 
+## READ THIS FIRST: Actions is disabled for this account
+
+As of when this was written, GitHub has **turned Actions off** for this repository and for the account's other RDP repository:
+
+> GitHub Actions is currently disabled for this repository. Please reach out to GitHub Support for assistance.
+
+That is not something a workflow file can fix. Until it is resolved, **no workflow in this repository can run at all**, and the runner never starts. Two ways forward:
+
+1. **Get it turned back on.** Open <https://github.com/adrielking12/THE-WORKING-RDP-/settings/actions> and check for an enable option. If it only tells you to contact Support, open a ticket at <https://support.github.com/contact?tags=dotcom-actions>. Be aware that using hosted runners as a free remote desktop, instead of for building and testing software, is against GitHub's Acceptable Use Policies - so an appeal can be refused, and re-using the same pattern can get an account flagged again.
+2. **Do not use Actions at all.** The exact same scripts run on any Windows machine you control (your PC, a laptop, a free-tier VM). See [Run it without GitHub Actions](#run-it-without-github-actions). This works today, with no GitHub involvement, and is still useful if Actions never comes back.
+
+Everything below describes the workflow, which is ready to go the moment Actions is available again.
+
+---
+
 ## Quick start
 
-1. **Fork or use this repo.** Actions are already enabled, and nothing needs to be configured.
-2. **Start a run.** Either push any commit, or open **Actions -> RDP (Windows) -> Run workflow**.
-3. **Get the connection details.** Open the running job and look for the `YOUR RDP SESSION IS READY` block in the log. The same values are in the run summary (top of the run page) and in the notice annotation at the top of the log.
-   * Shortcut: run `client/get-rdp-info.ps1` (or `client/get-rdp-info.sh`) locally and it will read them for you and can even start the RDP client.
-4. **Connect.**
+1. **Start a run:** **Actions -> RDP (Windows) -> Run workflow**. Pick a tunnel provider (or leave `auto`) and a duration, then press the green button.
+   * There is deliberately **no `push` trigger**: starting a six hour desktop on every commit is what gets accounts flagged. If you want that behaviour, add the commented out `push:` block at the top of `.github/workflows/main.yml`.
+2. **Get the connection details:** open the running job and read the `YOUR RDP SESSION IS READY` block in the log. The same values are in the **run summary** (top of the run page) and in the **notice annotation** at the top of the log.
+   * Shortcut: run `client/get-rdp-info.ps1` (or `client/get-rdp-info.sh`) locally and it finds them for you, and can start the RDP client for you.
+3. **Connect.**
    * Windows: `mstsc /v:HOST:PORT`, log in as the printed username, accept the certificate warning.
    * macOS: Microsoft Remote Desktop -> Add PC -> `HOST:PORT`.
    * Linux: `xfreerdp /v:HOST:PORT /u:USER /p:'PASSWORD' /dynamic-resolution +clipboard /cert:tofu`
    * iOS / Android: Microsoft Remote Desktop app, same three values.
 
-The session stays up for the duration of the job (**about 5.5 hours**, GitHub's hard limit for a single job is 6 hours). The workflow itself keeps the tunnel alive and reconnects it automatically, and it never restarts the tunnel while you are connected.
+The session lives for the duration of the job (default **330 minutes**, GitHub's hard limit is 6 hours). The workflow's keep-alive step health-checks the tunnel every 2.5 minutes, and automatically replaces it if a relay drops it - without kicking you out if you are connected at the time.
 
 ---
 
 ## Getting the connection details automatically
 
 ```powershell
-# Windows / macOS / Linux with pwsh
+# Windows, and macOS/Linux with pwsh
 pwsh -File ./client/get-rdp-info.ps1 -Wait -Launch
 ```
 
@@ -52,48 +69,67 @@ pwsh -File ./client/get-rdp-info.ps1 -Wait -Launch
 client\connect-rdp.cmd
 ```
 
-These scripts need the [GitHub CLI](https://cli.github.com) authenticated once with `gh auth login`. `get-rdp-info.ps1` also writes a `.rdp` shortcut file that you can double click.
+These need the [GitHub CLI](https://cli.github.com) authenticated once with `gh auth login`. `get-rdp-info.ps1` also writes a `.rdp` shortcut file you can double click.
 
 ---
 
 ## Which tunnel is used
 
-RDP needs a raw TCP pipe, not a web URL. Free TCP tunnels are the hard part of this repository, which is why there are several providers and automatic failover between them. With `-Provider auto` the workflow tries, in order:
+RDP needs a raw TCP pipe, not a web URL. Free TCP tunnels are the hard part of this repository, so there are several providers with automatic failover. With `auto` the workflow tries, in order:
 
 | order | provider | account needed | notes |
 | --- | --- | --- | --- |
-| 1 | **ngrok** | yes, free token | only tried when `NGROK_AUTH_TOKEN` exists. ngrok now requires a **payment method on file** before TCP endpoints work, even on the free plan, and free accounts allow a single agent session at a time. If it fails the workflow keeps going. |
-| 2 | **pinggy** | **no** | `ssh -R0:localhost:3389 tcp@free.pinggy.io`. No signup, no token, works out of the box. Free sessions last about an hour, the keep-alive step reopens them. |
-| 3 | **bore** | **no** | `bore local 3389 --to bore.pub`. Open source relay, no signup. The public port is random and can be busy, so it retries. |
-| 4 | **serveo** | **no** | `ssh -R 0:localhost:3389 serveo.net`. Public relay, occasionally overloaded. |
-| 5 | **tailscale** | yes, free key | only tried when `TS_AUTHKEY` exists. Gives a stable private IP, but your client must also be on your tailnet. Most reliable option overall. |
+| 1 | **ngrok** | free token | only tried when `NGROK_AUTH_TOKEN` exists. ngrok now requires a **payment method on file** before TCP endpoints work, even on the free plan, and free accounts allow one agent session at a time. If it fails, the workflow keeps going. |
+| 2 | **pinggy** | **no** | `ssh -R0:localhost:3389 tcp@free.pinggy.io`. No signup, no token. Free sessions last about an hour, the keep-alive step reopens them. |
+| 3 | **bore** | **no** | `bore local 3389 --to bore.pub`, open source relay, no signup. Random public port, retries when busy. |
+| 4 | **serveo** | **no** | `ssh -R 0:localhost:3389 serveo.net`. Last resort, occasionally overloaded. |
+| 5 | **tailscale** | free key | only tried when `TS_AUTHKEY` exists. Stable private IP, but your client must be on your tailnet too. The most reliable option overall. |
 
-So with **zero configuration** the workflow uses an account-less tunnel and just works. Pick a specific one with the `tunnel` input when you start a run.
+So **with zero configuration** the workflow uses an account-less tunnel and just works. Pick a specific one with the `tunnel` input.
 
-After a tunnel is up, the workflow proves it end to end: it speaks the first bytes of the RDP protocol (an X.224 connection request) through the public address and checks for the RDP server's answer. That result is printed as `verified=true/false`.
+After a tunnel is up, the workflow proves it end to end: it speaks the first bytes of the RDP protocol (an X.224 connection request) through the public address and checks that the RDP server answers. That result is printed as `verified=true/false`.
+
+---
+
+## Run it without GitHub Actions
+
+The scripts are standalone. On any Windows machine where you are an administrator:
+
+```powershell
+# 1. turn this machine into an RDP server (sets a password, opens the firewall)
+pwsh -File ./scripts/Enable-RdpServer.ps1 -Username $env:USERNAME -Password 'YourStrongPassword!'
+
+# 2. publish port 3389 through an account-less tunnel (keep it running)
+pwsh -File ./scripts/Start-RdpTunnel.ps1 -Provider pinggy
+
+# 3. read the address it prints, then connect from anywhere:
+#    mstsc /v:free.pinggy.io:48720
+```
+
+Use `-Provider auto` to let it pick, or `-Provider tailscale` with a `TS_AUTHKEY` in the environment for the most stable option. This is the same code path the workflow runs, minus the GitHub-specific environment variables - which means it also works on a VM, a home server, or a Windows Sandbox, and it is not going to make GitHub angry.
 
 ---
 
 ## Optional secrets
 
-Everything is optional. Add them in **Settings -> Secrets and variables -> Actions -> New repository secret**.
+All of them are optional. Add these under **Settings -> Secrets and variables -> Actions -> New repository secret**.
 
 | secret | what it does |
 | --- | --- |
-| `NGROK_AUTH_TOKEN` | Your ngrok token. Get one at <https://dashboard.ngrok.com/get-started/your-authtoken>. Note the payment method requirement above. |
-| `TS_AUTHKEY` | Tailscale auth key (<https://login.tailscale.com/admin/settings/keys>). Client must be on the same tailnet. |
-| `RDP_PASSWORD` | Use a fixed password instead of a random one per run. |
+| `NGROK_AUTH_TOKEN` | Your ngrok token, <https://dashboard.ngrok.com/get-started/your-authtoken>. Mind the payment method requirement above. |
+| `TS_AUTHKEY` | Tailscale auth key, <https://login.tailscale.com/admin/settings/keys>. Client must be on the same tailnet. |
+| `RDP_PASSWORD` | Fixed password instead of a random one per run. |
 | `RDP_USERNAME` | Enable a different local account (defaults to the account the runner runs as). |
-| `ALLOWED_CIDRS` | ngrok only: restrict the tunnel to your own IPs, for example `203.0.113.7/32`. Strongly recommended on public repos. |
+| `ALLOWED_CIDRS` | ngrok only: restrict the tunnel to your own addresses, for example `203.0.113.7/32`. Recommended if the repository is public. |
 
 ---
 
 ## How the repository is put together
 
 ```text
-.github/workflows/main.yml     the workflow: enable RDP -> tunnel -> publish -> keep alive
+.github/workflows/main.yml     workflow: enable RDP -> tunnel -> publish -> keep alive
 scripts/Enable-RdpServer.ps1   turns any Windows machine into an RDP server
-scripts/Start-RdpTunnel.ps1    the tunnel engine (ngrok/pinggy/bore/serveo/tailscale + self test)
+scripts/Start-RdpTunnel.ps1    tunnel engine (ngrok/pinggy/bore/serveo/tailscale) + RDP self test
 scripts/Watch-RdpSession.ps1   keep-alive, health checks, automatic tunnel restarts
 client/get-rdp-info.ps1        local helper: read host/user/password from the run log, launch mstsc
 client/get-rdp-info.sh         same for Linux/macOS, can launch xfreerdp
@@ -101,28 +137,26 @@ client/connect-rdp.cmd         double click wrapper for Windows
 docs/TROUBLESHOOTING.md        what to do when something does not work
 ```
 
-The three `scripts/*.ps1` files are standalone: you can run them on your own Windows PC or VM to expose it over RDP the same way.
-
 ---
 
 ## Security, honestly
 
-* A public repository has **public logs**, and the password is printed there so you can log in. Anyone who reads the log while a run is active could connect, exactly like the author of this repository intended for their own machine.
-* Mitigations, in order of effectiveness: keep the repository **private**; set `ALLOWED_CIDRS` so only your IP can reach the tunnel (ngrok); use `NGROK_AUTH_TOKEN` so the endpoint belongs to your account; or set `RDP_PASSWORD` yourself and rotate it.
-* Every run is a fresh, ephemeral GitHub runner. Nothing survives the run, and the machine is destroyed at the end.
-* Because you get a full desktop with administrator rights, do not use this for anything sensitive while somebody else could read the log.
+* A public repository has **public logs**, and the password is printed there so you can log in. Anyone reading the log while a run is active could connect.
+* Mitigations, best first: keep the repository **private**; set `ALLOWED_CIDRS` so only your IP can reach the tunnel (ngrok); use an `NGROK_AUTH_TOKEN` so the endpoint belongs to your account; or set `RDP_PASSWORD` yourself.
+* Every run is a fresh, ephemeral runner: nothing survives, and the machine is destroyed at the end.
+* You get a desktop **with administrator rights**. Treat it like a borrowed public computer.
 
 ## Limits worth knowing
 
-* GitHub kills a job at **6 hours**. The workflow defaults to 330 minutes and the keep-alive loop ends cleanly before the limit.
-* Free minutes: this repo is public, so Actions minutes for standard runners are free. On a private repo this burns roughly 4 minutes of metered time per wall-clock hour for `windows-latest`.
-* Windows runners only exist for public repos (or with a paid plan) - if the workflow refuses to start, that is why.
-* Multiple sessions are supported (up to 20), so you can connect from two machines at once.
+* GitHub kills a job at **6 hours**. The workflow defaults to 330 minutes and stops the keep-alive loop cleanly before that.
+* Windows runners are only available for public repositories on free plans, and on paid plans for private ones. If the job refuses to start, that is usually why.
+* On a private repository this burns roughly 4 minutes of metered time per wall-clock hour of `windows-latest` (GitHub bills Windows runners at 2x the Linux rate).
+* Up to 20 sessions can exist at once, so two people can connect to the same runner.
 
 ## Troubleshooting
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). The three most common ones:
 
+* **"GitHub Actions is currently disabled for this repository."** See the section at the top.
 * **"The workflow says no tunnel could be established."** ngrok failed (payment method / single session limit) and the account-less relays were unreachable from that runner. Re-run, or set `TS_AUTHKEY`.
-* **"mstsc says the remote computer is not found."** The address is only valid while the run is going; grab the newest one with `client/get-rdp-info.ps1`.
-* **"Credentials did not work."** The password changes every run, unless you set the `RDP_PASSWORD` secret. Read the newest one.
+* **"Credentials did not work."** The password changes every run unless you set the `RDP_PASSWORD` secret - read the newest one.

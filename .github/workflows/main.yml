@@ -22,6 +22,11 @@ name: RDP (Windows)
 #                     for example "203.0.113.7/32"
 # ---------------------------------------------------------------------------
 
+# Started by hand on purpose: see the note in README.md about the push trigger.
+# Add
+#   push:
+#     branches: ['**']
+# if you really want every push to start a six hour desktop.
 on:
   workflow_dispatch:
     inputs:
@@ -38,8 +43,6 @@ on:
         type: choice
         default: windows-latest
         options: [windows-latest, windows-2025, windows-2022]
-  push:
-    branches: ['**']
 
 permissions:
   contents: read
@@ -53,7 +56,7 @@ concurrency:
 jobs:
   rdp:
     name: Windows RDP session
-    runs-on: ${{ inputs.runner_image || 'windows-latest' }}
+    runs-on: ${{ github.event.inputs.runner_image || 'windows-latest' }}
     timeout-minutes: 355
 
     env:
@@ -65,8 +68,8 @@ jobs:
       RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
       RDP_USERNAME: ${{ secrets.RDP_USERNAME }}
       # Workflow inputs (empty on a push).
-      IN_TUNNEL: ${{ inputs.tunnel }}
-      IN_DURATION: ${{ inputs.duration_minutes }}
+      IN_TUNNEL: ${{ github.event.inputs.tunnel }}
+      IN_DURATION: ${{ github.event.inputs.duration_minutes }}
 
     steps:
       - name: Check out the repository

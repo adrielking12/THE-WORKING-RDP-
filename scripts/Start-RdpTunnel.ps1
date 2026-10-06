@@ -284,7 +284,13 @@ function Start-Ngrok {
             Stop-TrackedProcess -ProcessId $proc.Id
             return $null
         }
-        $m = [regex]::Match($text, 'tcp://([A-Za-z0-9\.\-]+):(\d{2,5})')
+        # The log line contains both "addr=tcp://localhost:3389" and
+        # "url=tcp://x.tcp.ngrok.io:PORT", so look for url= first and never
+        # accept a loopback address as the public endpoint.
+        $m = [regex]::Match($text, 'url=tcp://([A-Za-z0-9\.\-]+):(\d{2,5})')
+        if (-not $m.Success) {
+            $m = [regex]::Match($text, 'tcp://(?!localhost|127\.0\.0\.1)([A-Za-z0-9\.\-]+):(\d{2,5})')
+        }
         if ($m.Success) {
             return @{ Provider = 'ngrok'; Host = $m.Groups[1].Value; Port = [int]$m.Groups[2].Value; Pid = $proc.Id }
         }
@@ -495,12 +501,17 @@ foreach ($candidate in $order) {
         Write-Step "$candidate threw an exception: $($_.Exception.Message)" 'WARN'
         $result = $null
     }
-    if ($result -and $result.Host -and $result.Port) {
+    if ($result -and $result.Host -and $result.Port -and $result.Host -notmatch '^(localhost|127\.0\.0\.1)$') {
         $endpoint = $result
         Write-Step "$candidate is up: $($result.Host):$($result.Port)" 'OK'
         break
     }
     Write-Step "$candidate did not produce an endpoint, moving on." 'WARN'
+    $debugFiles = Get-ChildItem -Path $script:WorkDir -Filter "$candidate*" -ErrorAction SilentlyContinue
+    foreach ($f in $debugFiles) {
+        $raw = (Get-Text $f.FullName).Trim()
+        if ($raw) { Write-Step "  last output of $($f.Name): $($raw.Substring(0, [Math]::Min(400, $raw.Length)))" }
+    }
 }
 
 if (-not $endpoint) {

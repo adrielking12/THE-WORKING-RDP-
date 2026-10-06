@@ -19,6 +19,8 @@ Start a run, and about two minutes later you have an address, a username and a p
 ==============================================================
 ```
 
+**In a hurry? [RUN.md](RUN.md) has the exact commands for both ways to run this.**
+
 ---
 
 ## Your work is saved between sessions
@@ -118,6 +120,8 @@ After a tunnel is up, the workflow proves it end to end: it speaks the first byt
 ---
 
 ## Run it without GitHub Actions
+
+(Step by step version: [RUN.md](RUN.md#b-on-a-windows-pc-you-own-works-today). Needs Windows Pro, Enterprise or Education - Home editions cannot be RDP servers.)
 
 The scripts are standalone. On any Windows machine where you are an administrator:
 

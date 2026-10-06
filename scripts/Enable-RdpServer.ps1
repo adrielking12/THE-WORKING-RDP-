@@ -161,6 +161,39 @@ if (-not $isAdmin) {
     throw 'This script must run as Administrator (RDP settings live in HKLM and need service restarts).'
 }
 
+<#
+    Only Pro / Enterprise / Education editions can act as an RDP server. On a
+    Home edition every registry value below would be written happily and
+    nothing would ever listen, which is a miserable thing to debug, so say so
+    up front.
+#>
+try {
+    $editionId = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' `
+        -Name 'EditionID' -ErrorAction Stop).EditionID
+    $productName = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' `
+        -Name 'ProductName' -ErrorAction SilentlyContinue).ProductName
+}
+catch {
+    $editionId = ''
+    $productName = ''
+}
+
+if ($editionId -match '^(Core|Starter|Home)') {
+    Write-Host ''
+    Write-Step "This machine runs $productName ($editionId), which is a Home edition." 'ERROR'
+    throw @'
+Windows Home editions do not include the Remote Desktop server at all - there
+is no way to enable it, it is a licensed feature of Pro/Enterprise/Education.
+The workflow part still works fine on a GitHub windows-latest runner
+(Windows Server Datacenter), and this script works on any Pro/Enterprise VM.
+
+Alternatives for a Home machine:
+  * use the GitHub Actions workflow instead (see README, needs Actions enabled)
+  * use a free/cheap cloud VM with Windows Server or Windows 11 Pro
+  * for remote control of a Home machine, use VNC or RustDesk/AnyDesk instead
+'@
+}
+
 Write-Host ''
 Write-Host '=============================================================='
 Write-Host '  Enabling Remote Desktop (RDP) on this machine'

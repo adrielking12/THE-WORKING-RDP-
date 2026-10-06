@@ -77,7 +77,37 @@ The same values appear in the run summary (top of the run page) and in the notic
 
 ---
 
-## 6. Running it on your own Windows PC instead of a runner
+## 7. Saving and restoring your data
+
+| symptom | cause | fix |
+| --- | --- | --- |
+| "No previous snapshot found, this looks like the first session." | nothing was saved yet, or the `rdp-data` branch was deleted | that is normal for the first run; do some work and it will be there next time |
+| "The stored snapshot is encrypted and there is no backup password for this run" | you did not set `RDP_BACKUP_PASSWORD`, so the previous session used a generated password | copy the password that was printed in the previous run's summary/warning annotation into the `RDP_BACKUP_PASSWORD` secret |
+| "Could not decrypt the snapshot: the backup password is wrong (or the file is damaged)" | wrong secret value | fix the secret; your data is still in the branch, encrypted with the old password |
+| "Could not push the snapshot" | the workflow token has read-only permission | Settings -> Actions -> General -> Workflow permissions -> **Read and write permissions** |
+| Snapshot is much bigger than expected | a folder you added with `save_paths` has big files | narrow the path, or lower the value; the workflow refuses to push over `MaxTotalMB` |
+| My files are older than the last few minutes of the session | you were still working when the job ended | the end-of-session save runs with `if: always()`, but a hard cancellation (concurrency, or the 6 hour kill) can lose the last few minutes; press `Save now.cmd` on the desktop before you stop working |
+| I want to restore files into a different machine | - | download the branch as a zip and unpack it; `profile.zip` mirrors your user profile, so `Desktop\` etc. drop straight into place |
+
+### Seeing the snapshot branch
+
+```bash
+gh browse --repo <owner>/<repo> --branch rdp-data      # or just open the URL
+```
+
+Files that are not encrypted can be downloaded straight from GitHub. If the snapshot is encrypted, the `.enc` file is only useful with the password; the workflow is the thing that decrypts it.
+
+### Turning persistence off
+
+Start the run with `save_data: off`, or delete the `rdp-data` branch to start over from an empty profile.
+
+### How the snapshot is protected
+
+`profile.enc` is `RDPBK1 | salt(16) | iv(16) | length(8) | ciphertext | hmac-sha256(32)`, where the AES-256 key and the HMAC key come from PBKDF2-SHA1 with 100,000 iterations over your password. A wrong password fails the HMAC check *before* anything is written to disk. Large snapshots are split into `profile.enc.part000`, `part001`, ... because GitHub refuses files over 100 MB.
+
+---
+
+## 8. Running it on your own Windows PC instead of a runner
 
 The scripts are standalone:
 

@@ -34,7 +34,10 @@ param(
     [int]$LocalPort = 3389,
 
     # Path of the state file written by Start-RdpTunnel.ps1.
-    [string]$StateFile = ''
+    [string]$StateFile = '',
+
+    # Path of the state file written by Sync-RdpData.ps1.
+    [string]$SyncStateFile = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -108,6 +111,52 @@ function Test-ActiveRdpSession {
     return $false
 }
 
+<#
+    The autosave watcher is a separate background process. If it ever exits or
+    stops making progress, start it again so nothing you do goes unsaved.
+#>
+function Test-SyncWatcher {
+    param([int]$IntervalMinutes = 10, [switch]$Restart)
+
+    $state = Read-State -Path $SyncStateFile
+    if (-not $state) {
+        Write-Step 'The autosave watcher has not written any state yet.' 'WARN'
+        return $false
+    }
+
+    $alive = $false
+    if ($state.watcherPid) {
+        $alive = [bool](Get-Process -Id ([int]$state.watcherPid) -ErrorAction SilentlyContinue)
+    }
+
+    $ageMinutes = 999
+    if ($state.lastCheck) {
+        try { $ageMinutes = ((Get-Date).ToUniversalTime() - [datetime]::Parse($state.lastCheck).ToUniversalTime()).TotalMinutes }
+        catch { }
+    }
+
+    $limit = [Math]::Max(25, ($IntervalMinutes * 2.5))
+    if ($alive -and $ageMinutes -le $limit) { return $true }
+
+    Write-Step "The autosave watcher looks dead (process alive: $alive, last cycle $([int]$ageMinutes) min ago)." 'WARN'
+    if (-not $Restart) { return $false }
+
+    $log = Join-Path (Split-Path $SyncStateFile) 'watch-restart.log'
+    $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
+    try {
+        Start-Process -FilePath $psExe -PassThru -WindowStyle Hidden `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $syncScript, '-Mode', 'Watch') `
+            -RedirectStandardOutput $log -RedirectStandardError "$log.err" | Out-Null
+        Start-Sleep -Seconds 6
+        Write-Step "Autosave watcher restarted (log: $log)" 'OK'
+        return $true
+    }
+    catch {
+        Write-Step "Could not restart the autosave watcher: $($_.Exception.Message)" 'ERROR'
+        return $false
+    }
+}
+
 function Read-State {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return $null }
@@ -122,6 +171,14 @@ if (-not $StateFile) {
 }
 
 $tunnelScript = Join-Path $PSScriptRoot 'Start-RdpTunnel.ps1'
+$syncScript = Join-Path $PSScriptRoot 'Sync-RdpData.ps1'
+
+if (-not $SyncStateFile) {
+    if ($env:RDP_SYNC_STATE) { $SyncStateFile = $env:RDP_SYNC_STATE }
+    elseif ($env:RUNNER_TEMP) { $SyncStateFile = Join-Path $env:RUNNER_TEMP 'rdp-sync\sync-state.json' }
+    else { $SyncStateFile = Join-Path ([System.IO.Path]::GetTempPath()) 'rdp-sync\sync-state.json' }
+}
+$syncEnabled = ($env:IN_SAVE_DATA -ne 'off') -and (Test-Path $syncScript)
 $state = Read-State -Path $StateFile
 
 if (-not $state) {
@@ -159,6 +216,13 @@ while ((Get-Date) -lt $deadline) {
     $status = if ($ok) { 'OK' } else { "unreachable (attempt $failures)" }
     $level = if ($ok) { 'OK' } else { 'WARN' }
     Write-Step "status: $status | endpoint $host_:$port | provider $provider | remaining ~$remaining min | session in use: $busy" $level
+
+    # 2b. is your data still being autosaved?
+    if ($syncEnabled) {
+        $syncInterval = 10
+        if ($env:RDP_SAVE_INTERVAL_MINUTES -match '^\d+$') { $syncInterval = [int]$env:RDP_SAVE_INTERVAL_MINUTES }
+        Test-SyncWatcher -IntervalMinutes $syncInterval -Restart | Out-Null
+    }
 
     # 3. restart the tunnel when it is broken, or proactively before a relay
     #    drops us (only while nobody is connected).

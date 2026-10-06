@@ -43,9 +43,25 @@ on:
         type: choice
         default: windows-latest
         options: [windows-latest, windows-2025, windows-2022]
+      save_data:
+        description: 'Save your files and restore them next session'
+        type: choice
+        default: 'on'
+        options: ['on', 'off']
+      save_interval_minutes:
+        description: 'How often to snapshot your files (minutes)'
+        default: '10'
+      backup_encryption:
+        description: 'Encrypt the snapshot (auto = yes on a public repo)'
+        type: choice
+        default: auto
+        options: [auto, always, never]
+      save_paths:
+        description: 'Extra folders to save, semicolon separated (optional)'
+        default: ''
 
 permissions:
-  contents: read
+  contents: write   # needed to push the data snapshot to the rdp-data branch
 
 # A new run on the same branch kills the previous one so you never end up with
 # a pile of six hour RDP machines.
@@ -67,9 +83,19 @@ jobs:
       ALLOWED_CIDRS: ${{ secrets.ALLOWED_CIDRS }}
       RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
       RDP_USERNAME: ${{ secrets.RDP_USERNAME }}
+      # Token used to push the data snapshot branch. This is the automatic
+      # GITHUB_TOKEN, not a personal one, so nothing secret is stored in the
+      # repository and the token dies with the run.
+      GH_PUSH_TOKEN: ${{ github.token }}
+      # Optional: password that encrypts the snapshot (recommended).
+      RDP_BACKUP_PASSWORD: ${{ secrets.RDP_BACKUP_PASSWORD }}
       # Workflow inputs (empty on a push).
       IN_TUNNEL: ${{ github.event.inputs.tunnel }}
       IN_DURATION: ${{ github.event.inputs.duration_minutes }}
+      IN_SAVE_DATA: ${{ github.event.inputs.save_data }}
+      IN_SAVE_INTERVAL: ${{ github.event.inputs.save_interval_minutes }}
+      IN_ENCRYPTION: ${{ github.event.inputs.backup_encryption }}
+      IN_SAVE_PATHS: ${{ github.event.inputs.save_paths }}
 
     steps:
       - name: Check out the repository
@@ -99,6 +125,28 @@ jobs:
           Write-Host "Runner account : $env:USERNAME"
           Write-Host "Free disk (GB) : $([math]::Round((Get-PSDrive C).Free / 1GB, 1))"
           Write-Host "CPU cores      : $env:NUMBER_OF_PROCESSORS"
+
+      - name: Restore your files from the last session
+        if: ${{ github.event.inputs.save_data != 'off' }}
+        shell: pwsh
+        run: |
+          # The password used for the previous snapshot comes from the
+          # RDP_BACKUP_PASSWORD secret. Without it an encrypted snapshot cannot
+          # be restored, and the step says so instead of failing.
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Sync-RdpData.ps1 -Mode Restore
+
+      - name: Prepare data persistence
+        if: ${{ github.event.inputs.save_data != 'off' }}
+        shell: pwsh
+        run: |
+          $interval = if ($env:IN_SAVE_INTERVAL -match '^\d+$') { [int]$env:IN_SAVE_INTERVAL } else { 10 }
+          $encryption = if ($env:IN_ENCRYPTION) { $env:IN_ENCRYPTION } else { 'auto' }
+          # Exports RDP_SAVE_INTERVAL_MINUTES / RDP_SAVE_ENCRYPTION for the
+          # autosave watcher and for the keep-alive step below.
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Sync-RdpData.ps1 `
+            -Mode Prepare `
+            -IntervalMinutes $interval `
+            -Encryption $encryption
 
       - name: Enable Remote Desktop
         shell: pwsh
@@ -137,6 +185,22 @@ jobs:
             Write-Host '::warning title=No tunnel::The workflow could not open any tunnel. Check the log of the "Open a public tunnel" step.'
           }
 
+      - name: Start autosaving your files
+        if: ${{ github.event.inputs.save_data != 'off' }}
+        shell: pwsh
+        run: |
+          # Background process: snapshots the profile every few minutes and
+          # pushes it to the data branch. It lives for the rest of the job, and
+          # the keep-alive step below restarts it if it ever dies.
+          $log = Join-Path $env:RUNNER_TEMP 'rdp-sync-watch.log'
+          $script = Join-Path (Get-Location) 'scripts\Sync-RdpData.ps1'
+          $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script, '-Mode', 'Watch')
+          $proc = Start-Process -FilePath 'pwsh' -ArgumentList $args -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+          Write-Host "Autosave watcher started (pid $($proc.Id)), log: $log"
+          Start-Sleep -Seconds 5
+          if (Test-Path $log) { Get-Content $log -Tail 20 | ForEach-Object { Write-Host "  $_" } }
+
       - name: Upload the connection details as an artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -155,3 +219,32 @@ jobs:
           if ($env:IN_DURATION -and $env:IN_DURATION -match '^\d+$') { $minutes = [int]$env:IN_DURATION }
           if ($minutes -gt 340) { $minutes = 340 }
           pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Watch-RdpSession.ps1 -Minutes $minutes
+
+      - name: Save your files for the next session
+        if: always() && github.event.inputs.save_data != 'off'
+        shell: pwsh
+        run: |
+          # One last snapshot with everything you did before the job ends.
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Sync-RdpData.ps1 -Mode Save -Force
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/Sync-RdpData.ps1 -Mode Status
+          $statePath = Join-Path $env:RUNNER_TEMP 'rdp-sync\sync-state.json'
+          if (Test-Path $statePath) {
+            $state = Get-Content $statePath -Raw | ConvertFrom-Json
+            $branch = if ($state.branch) { $state.branch } else { 'rdp-data' }
+            if ($state.generatedPassword) {
+              Write-Host "::warning title=Save this backup password::Files are encrypted with $($state.password) - set it as the RDP_BACKUP_PASSWORD secret to restore them automatically."
+            }
+            if ($env:GITHUB_STEP_SUMMARY) {
+              $rows = @(
+                '', '### Your files are saved', '',
+                "| field | value |", "| --- | --- |",
+                "| files | ``$($state.fileCount)`` |",
+                "| snapshot size | ``$($state.payloadMB)`` MB in $($state.parts) part(s) |",
+                "| encrypted | ``$($state.encrypted)`` |",
+                "| branch | ``$branch`` |",
+                "| download | https://github.com/$env:GITHUB_REPOSITORY/tree/$branch |",
+                ''
+              )
+              $rows | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+            }
+          }

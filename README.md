@@ -19,7 +19,9 @@ Start a run, and about two minutes later you have an address, a username and a p
 ==============================================================
 ```
 
-**In a hurry? [RUN.md](RUN.md) has the exact commands for both ways to run this.**
+**Never done this before? Follow [START-HERE.md](START-HERE.md) - it walks through everything from zero, including the support ticket to get Actions re-enabled.**
+
+**In a hurry? [RUN.md](RUN.md) has just the commands.**
 
 **Want no typing at all?** Once Actions is enabled, double click `client\connect-rdp.cmd`: it starts the workflow if nothing is running, waits for the desktop, saves the credentials so Remote Desktop does not prompt, opens it on the right address, and reconnects by itself when a free tunnel rotates its address. Linux/macOS: `./client/rdp-auto.sh --watch`.
 
@@ -164,6 +166,8 @@ The data snapshot uses the workflow's own `GITHUB_TOKEN` (`GH_PUSH_TOKEN` in the
 ## How the repository is put together
 
 ```text
+START-HERE.md                  complete from-zero walkthrough
+RUN.md                         just the commands, both ways
 .github/workflows/main.yml     workflow: enable RDP -> tunnel -> publish -> keep alive
 scripts/Enable-RdpServer.ps1   turns any Windows machine into an RDP server
 scripts/Start-RdpTunnel.ps1    tunnel engine (ngrok/pinggy/bore/serveo/tailscale) + RDP self test

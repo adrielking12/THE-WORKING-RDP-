@@ -1,5 +1,7 @@
 # How to run it
 
+> Brand new to this? [START-HERE.md](START-HERE.md) is the guided version, including how to unblock Actions, the setup, the daily loop and every error message.
+
 There are two ways. **B** works right now. **A** is the GitHub Actions way and is currently blocked for this account (see the note at the end).
 
 ---
@@ -17,12 +19,7 @@ That single click:
 5. opens the desktop on the right address
 6. keeps watching, and reconnects by itself when a free tunnel rotates its address
 
-Prerequisites, both one time only:
-
-```powershell
-winget install --id GitHub.cli     # the GitHub CLI
-gh auth login                      # log in through the browser
-```
+Prerequisites: none. The first double click installs the GitHub CLI for you if it is missing, and asks you to log in to GitHub once through the browser.
 
 Then just double click. If you prefer the terminal:
 

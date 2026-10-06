@@ -100,9 +100,26 @@ $cachePath = Join-Path $stateDir 'session.json'
 $rdpFilePath = Join-Path $stateDir 'session.rdp'
 
 # ------------------------------------------------------- dependency check ----
+# The GitHub CLI installs into Program Files (or the per user Programs folder)
+# and a freshly installed copy is not always on PATH yet, so look there too.
+if (-not (Test-Command 'gh')) {
+    $guesses = @(
+        (Join-Path $env:ProgramFiles 'GitHub CLI'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\GitHub CLI')
+    )
+    foreach ($dir in $guesses) {
+        if ($dir -and (Test-Path (Join-Path $dir 'gh.exe'))) {
+            $env:PATH = "$env:PATH;$dir"
+            Write-Step "Found the GitHub CLI in $dir"
+            break
+        }
+    }
+}
+
 if (-not (Test-Command 'gh')) {
     Write-Bad 'The GitHub CLI (gh) is missing. Install it, then run this again:'
-    Write-Host '    winget install --id GitHub.cli' -ForegroundColor White
+    Write-Host '    winget install --id GitHub.cli -e' -ForegroundColor White
+    Write-Host '    (or double click connect-rdp.cmd, which installs it for you)' -ForegroundColor DarkGray
     exit 1
 }
 
